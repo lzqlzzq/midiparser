@@ -1,0 +1,9 @@
+#!/bin/sh
+export OLD_LD_LIBRARY_PATH=$LD_LIBRARY_PATH
+export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH
+echo "LD_LIBRARY_PATH: $LD_LIBRARY_PATH"
+
+cargo test --lib -- --show-output
+
+export LD_LIBRARY_PATH=${OLD_LD_LIBRARY_PATH}
+unset OLD_LD_LIBRARY_PATH
