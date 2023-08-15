@@ -106,8 +106,9 @@ pub struct MIDIMessage {
     pub status: EventStatus,
     pub data: Vec<u8>,
 }
-
+// 32 + 8 + 64 + n * 8
 impl MIDIMessage {
+    #[inline(always)]
     pub fn channel(&self) -> Option<u8> {
         match self.status {
             EventStatus::NoteOff |
@@ -121,6 +122,7 @@ impl MIDIMessage {
         }
     }
 
+    #[inline(always)]
     pub fn key(&self) -> Option<u8> {
         match self.status {
             EventStatus::NoteOff |
@@ -130,6 +132,7 @@ impl MIDIMessage {
         }
     }
 
+    #[inline(always)]
     pub fn velocity(&self) -> Option<u8> {
         match self.status {
             EventStatus::NoteOff |
@@ -139,6 +142,7 @@ impl MIDIMessage {
         }
     }
 
+    #[inline(always)]
     pub fn controller_change(&self) -> Option<u8> {
         match self.status {
             EventStatus::ControlChange => Some(self.data[1]),
@@ -146,6 +150,7 @@ impl MIDIMessage {
         }
     }
 
+    #[inline(always)]
     pub fn controller_change_value(&self) -> Option<u8> {
         match self.status {
             EventStatus::ControlChange => Some(self.data[2]),
@@ -153,6 +158,15 @@ impl MIDIMessage {
         }
     }
 
+    #[inline(always)]
+    pub fn program(&self) -> Option<u8> {
+        match self.status {
+            EventStatus::ProgramChange => Some(self.data[1]),
+            _ => None,
+        }
+    }
+
+    #[inline(always)]
     pub fn meta_type(&self) -> Option<MetaStatus> {
         match self.status {
             EventStatus::Meta => Some(MetaStatus::from_status_code(&self.data[1])),
@@ -160,6 +174,7 @@ impl MIDIMessage {
         }
     }
 
+    #[inline(always)]
     pub fn meta_value(&self) -> Option<Vec<u8>> {
         match self.status {
             EventStatus::Meta => Some((self.data[3..]).to_vec()),
@@ -167,6 +182,7 @@ impl MIDIMessage {
         }
     }
 
+    #[inline(always)]
     pub fn tempo_change(&self) -> Option<u32> {
         match self.meta_type() {
             Some(MetaStatus::SetTempo) => {
