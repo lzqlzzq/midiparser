@@ -56,7 +56,7 @@ fn parse_mtrk(data: &[u8], bytes: usize) -> Result<MIDITrack, &'static str> {
                 last_status_code = this_status.clone();
                 let (status, event_len) = EventStatus::from_status_code(&data[byte_offset]);
                 (last_status, last_event_len) = (status.clone(), event_len as usize);
-                (status.clone(), Vec::from(&data[byte_offset..byte_offset+(event_len as usize)]), event_len as usize)
+                (status, Vec::from(&data[byte_offset..byte_offset+(event_len as usize)]), event_len as usize)
             },
             // Meta Messages has variable length.
             0xFF => {
@@ -66,13 +66,13 @@ fn parse_mtrk(data: &[u8], bytes: usize) -> Result<MIDITrack, &'static str> {
                     None => &[0u8, 0u8, 0u8, 0u8],
                 });
                 metalen += (meta_length_bytes as usize) + 2;
-                (EventStatus::from_status_code(this_status).0.clone(), Vec::from(&data[byte_offset..byte_offset+metalen]), metalen)
+                (EventStatus::from_status_code(this_status).0, Vec::from(&data[byte_offset..byte_offset+metalen]), metalen)
             },
         };
 
         track.message.push(MIDIMessage {
             time: tick_offset,
-            status: event_status.clone(),
+            status: event_status,
             data: message_data,
         });
 
@@ -119,7 +119,7 @@ mod tests {
 
     #[test]
     fn test_read_midi_head() {
-        let mf = read_midi_file("tests/test_mid.mid").expect("Read midi failed.");
+        let mf = read_midi_file("tests/tiny2.mid").expect("Read midi failed.");
 
         assert!(mf.format == MIDIFormat::MultiTrack);
         println!("{:?}", mf.track_num);

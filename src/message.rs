@@ -75,6 +75,7 @@ pub enum MetaStatus {
     TimeSignature = 0x58,
     KeySignature = 0x59,
     SequencerSpecificMeta = 0x7F,
+    Unknown
 }
 
 impl MetaStatus {
@@ -95,7 +96,8 @@ impl MetaStatus {
             0x58 => MetaStatus::TimeSignature,
             0x59 => MetaStatus::KeySignature,
             0x7F => MetaStatus::SequencerSpecificMeta,
-            _ => panic!("Meta status code {:?} not implemented!", status),
+            // _ => panic!("Meta status code {:?} not implemented!", status),
+            _ => MetaStatus::Unknown
         }
     }
 }
@@ -195,6 +197,7 @@ impl MIDIMessage {
         }
     }
 
+    #[inline(always)]
     pub fn key_signature(&self) -> Option<&'static str> {
         match self.meta_type() {
             Some(MetaStatus::KeySignature) => Some(
@@ -239,6 +242,7 @@ impl MIDIMessage {
         }
     }
 
+    #[inline(always)]
     pub fn time_signature(&self) -> Option<(u8, u8, u8, u8)> {
         match self.meta_type() {
             Some(MetaStatus::TimeSignature) => Some((

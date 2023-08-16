@@ -1,10 +1,8 @@
-use fraction::{Fraction, division};
-use crate::{EventStatus, MetaStatus};
-use crate::mesage::{ EventStatus, MIDIMessage, MIDIFormat, MetaStatus };
+use crate::message::{ EventStatus, MIDIMessage, MIDIFormat, MetaStatus };
 use crate::io:: { MIDITrack, MIDIFile };
 use std::collections::HashMap;
 
-const DEFAULT_QPM :f32 = 120;
+const DEFAULT_QPM :f32 = 120.0;
 const DEFAULT_TEMPO: u32 = 500000;
 
 
@@ -40,8 +38,6 @@ pub struct Tempo{
 	pub qpm: f32,
 }
 
-
-
 #[derive(Clone, Debug)]
 pub struct Track {
 	pub name: String,
@@ -59,26 +55,25 @@ pub struct Sequence {
 }
 
 
+#[inline(always)]
 pub fn tempo2qpm(tempo: u32) -> f32 {
 	return 6e7 / tempo as f32;
 }
 
-
-
 impl Sequence{
-	pub fn from_midi(midi: MIDIFile) -> Sequence{
+	pub fn from_midi(midi: &MIDIFile) -> Sequence{
 		if (midi.division >> 15) == 1 {panic!()}
 		let tpq = midi.division as f32;
 		let mut qpm = Vec::new();
 		let mut time_signatures = Vec::new();
 		let mut key_signatures = Vec::new();
-		let mut tracks = HashMap::<(usize, u8), Track>::new(); // (track_idx, channel) -> Track
+		let mut tracks = HashMap::<(u8, u8), Track>::new(); // (track_idx, channel) -> Track
 		for (track_idx, track) in midi.track.iter().enumerate() {
-			for msg in track.message{
-				let mut track_name = String::new();
-				let mut cur_instr = [0_u8; 16];
-				let mut last_note_on = [[(0_f32, 0_u8); 128]; 16];
-				
+			let track_idx = track_idx as u8;
+			let mut track_name = String::new();
+			let mut cur_instr = [0_u8; 16];
+			let mut last_note_on = [[(0_f32, 0_u8); 128]; 16];
+			for msg in track.message.iter(){
 				match msg.status {
 					EventStatus::Meta => {
 						match msg.meta_type().unwrap() {
@@ -152,24 +147,51 @@ impl Sequence{
 									start: time,
 									duration: (msg.time as f32 / tpq) - time
 								});
-							} else {	// Note on
-								last_note_on[channel as usize][pitch as usize] = (
-									msg.time as f32 / tpq,
-									velocity
-								);
-							}
+								last_note_on[channel as usize][pitch as usize].1 = 0;
+							} 
+						} else {	// Note on
+							last_note_on[channel as usize][pitch as usize] = (
+								msg.time as f32 / tpq,
+								velocity
+							);
 						}
 					},
 					_ => {}
 				}
 			}
 		}
+		qpm.sort_by(|a, b| a.time.partial_cmp(&b.time).unwrap());
+		time_signatures.sort_by(|a, b| a.time.partial_cmp(&b.time).unwrap());
+		key_signatures.sort_by(|a, b| a.time.partial_cmp(&b.time).unwrap());
+		if qpm.is_empty() || qpm[0].time > 0.0 {
+			qpm.insert(0, Tempo {time:0.0, qpm: DEFAULT_QPM});
+		}
 		return Sequence{
-			tracks: tracks.into_iter().map(|(_, v)| v).collect(),
+			tracks: tracks.into_iter().map(|(k, v)| {
+				println!("{:?}", k); return v;
+			}).collect(),
 			time_signatures,
 			key_signatures,
 			qpm
 		}
 		
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::io::read_midi_file;
+	#[test]
+	fn test_midi2seq() {
+		let mf = read_midi_file("tests/tiny2.mid").expect("Read midi failed.");
+		let seq = Sequence::from_midi(&mf);
+		for track in  seq.tracks {
+			println!("Track: {}", track.name);
+			println!("{:?}", track);
+			// for note in track.notes {
+			// 	println!("\t {:?}", note);
+			// }
+		}
 	}
 }
