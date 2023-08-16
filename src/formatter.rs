@@ -1,5 +1,5 @@
-use crate::message::{ EventStatus, MIDIMessage, MIDIFormat, MetaStatus };
-use crate::io:: { MIDITrack, MIDIFile };
+use crate::message::{ EventStatus, MetaStatus };
+use crate::io::MIDIFile;
 use std::collections::HashMap;
 
 const DEFAULT_QPM :f32 = 120.0;
@@ -11,6 +11,7 @@ pub struct Note {
 	pub pitch: u8,
 	pub start: f32,
 	pub duration: f32,
+	pub velocity: u8,
 }
 
 #[derive(Clone, Debug)]
@@ -42,6 +43,7 @@ pub struct Tempo{
 pub struct Track {
 	pub name: String,
 	pub program: u8,
+	pub is_drum: bool,
 	pub notes: Vec<Note>,
 	pub controls: HashMap<u8, Vec<ControlChange>>,
 }
@@ -57,7 +59,7 @@ pub struct Sequence {
 
 #[inline(always)]
 pub fn tempo2qpm(tempo: u32) -> f32 {
-	return 6e7 / tempo as f32;
+	6e7 / tempo as f32
 }
 
 impl Sequence{
@@ -68,11 +70,12 @@ impl Sequence{
 		let mut time_signatures = Vec::new();
 		let mut key_signatures = Vec::new();
 		let mut tracks = HashMap::<(u8, u8), Track>::new(); // (track_idx, channel) -> Track
+		let mut track_names = vec![String::new(); midi.track.len()];
+
 		for (track_idx, track) in midi.track.iter().enumerate() {
 			let track_idx = track_idx as u8;
-			let mut track_name = String::new();
 			let mut cur_instr = [0_u8; 16];
-			let mut last_note_on = [[(0_f32, 0_u8); 128]; 16];
+			let mut last_note_on = [[(0_u32, 0_u8); 128]; 16];
 			for msg in track.message.iter(){
 				match msg.status {
 					EventStatus::Meta => {
@@ -97,11 +100,12 @@ impl Sequence{
 									key: 0 // TODO
 								});
 							},
-							MetaStatus::InstrumentName => {
-								track_name = String::from_utf8(
+							MetaStatus::TrackName => {
+								let name: String = String::from_utf8(
 									msg.meta_value()
 									.unwrap_or(Vec::new())
 								).unwrap_or(String::new());
+								track_names[track_idx as usize] = name;
 							},
 							_ => {}
 						}
@@ -111,11 +115,13 @@ impl Sequence{
 							= msg.program().unwrap_or(0);
 					},
 					EventStatus::ControlChange => {
+						let channel = msg.channel().unwrap_or(0);
 						let track_entry = tracks
-							.entry((track_idx, msg.channel().unwrap_or(0)))
+							.entry((track_idx, channel))
 							.or_insert(Track{
-								name: track_name.clone(),
-								program: cur_instr[msg.channel().unwrap_or(0) as usize],
+								name: String::new(),
+								program: cur_instr[channel as usize],
+								is_drum: channel == 9,
 								notes: Vec::new(),
 								controls: HashMap::new()
 							});
@@ -133,26 +139,27 @@ impl Sequence{
 						let pitch = msg.key().unwrap();
 						if velocity == 0 || msg.status == EventStatus::NoteOff {
 							// note off
-							let (time, vel) = last_note_on[channel as usize][pitch as usize];
+							let (start, vel) = last_note_on[channel as usize][pitch as usize];
 							if vel != 0 {
 								let entry = tracks.entry((track_idx, channel))
 									.or_insert(Track{
-										name: track_name.clone(),
+										name: String::new(),
 										program: cur_instr[channel as usize],
+										is_drum: channel == 9,
 										notes: Vec::new(),
 										controls: HashMap::new()
 									});
 								entry.notes.push(Note{
 									pitch,
-									start: time,
-									duration: (msg.time as f32 / tpq) - time
+									start: start as f32 / tpq,
+									duration: (msg.time - start) as f32 / tpq,
+									velocity: vel
 								});
 								last_note_on[channel as usize][pitch as usize].1 = 0;
 							} 
 						} else {	// Note on
 							last_note_on[channel as usize][pitch as usize] = (
-								msg.time as f32 / tpq,
-								velocity
+								msg.time, velocity
 							);
 						}
 					},
@@ -166,15 +173,17 @@ impl Sequence{
 		if qpm.is_empty() || qpm[0].time > 0.0 {
 			qpm.insert(0, Tempo {time:0.0, qpm: DEFAULT_QPM});
 		}
-		return Sequence{
-			tracks: tracks.into_iter().map(|(k, v)| {
-				println!("{:?}", k); return v;
-			}).collect(),
+		Sequence{
+			tracks: tracks
+				.into_iter()
+				.map(|(k, mut t)| {
+					t.name = track_names[k.0 as usize].clone(); t
+				}).filter(|t| !t.notes.is_empty())
+				.collect(),
 			time_signatures,
 			key_signatures,
 			qpm
 		}
-		
 	}
 }
 
@@ -184,14 +193,14 @@ mod tests {
 	use crate::io::read_midi_file;
 	#[test]
 	fn test_midi2seq() {
-		let mf = read_midi_file("tests/tiny2.mid").expect("Read midi failed.");
+		let mf = read_midi_file("tests/tiny.mid").expect("Read midi failed.");
 		let seq = Sequence::from_midi(&mf);
+		println!("Time Signature: {:?}", seq.time_signatures);
+		println!("Key Signature: {:?}", seq.key_signatures);
+		println!("QPM {:?}", seq.qpm);
 		for track in  seq.tracks {
 			println!("Track: {}", track.name);
 			println!("{:?}", track);
-			// for note in track.notes {
-			// 	println!("\t {:?}", note);
-			// }
 		}
 	}
 }

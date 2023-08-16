@@ -1,7 +1,7 @@
 use std::fs;
 use std::str;
-use crate::message::{ EventStatus, MIDIMessage, MIDIFormat, MetaStatus };
-use crate::util:: { read_variable_length };
+use crate::message::{ EventStatus, MIDIMessage, MIDIFormat, MetaStatus};
+use crate::util:: read_variable_length;
 
 #[derive(Clone)]
 pub struct MIDITrack {
@@ -49,13 +49,13 @@ fn parse_mtrk(data: &[u8], bytes: usize) -> Result<MIDITrack, &'static str> {
             0x00..=0x7F => {
                 let mut message = vec![last_status_code];
                 message.extend_from_slice(&data[byte_offset..byte_offset+last_event_len-1]);
-                (last_status.clone(), message, last_event_len - 1)
+                (last_status, message, last_event_len - 1)
             },
             // MIDI Messages and SysEx Messages has determinated length.
             0x80..=0xFE => {
-                last_status_code = this_status.clone();
+                last_status_code = *this_status;
                 let (status, event_len) = EventStatus::from_status_code(&data[byte_offset]);
-                (last_status, last_event_len) = (status.clone(), event_len as usize);
+                (last_status, last_event_len) = (status, event_len as usize);
                 (status, Vec::from(&data[byte_offset..byte_offset+(event_len as usize)]), event_len as usize)
             },
             // Meta Messages has variable length.
@@ -91,9 +91,9 @@ pub fn read_midi_file(path: &str) -> Result<MIDIFile, &'static str> {
     // Parse MThd Chunk
     let (format, track_num, division) = parse_mthd(&data[8..14]);
     let mut midi_file = MIDIFile {
-        format: format,
-        track_num: track_num,
-        division: division,
+        format,
+        track_num,
+        division,
         track: Vec::new(),
     };
 
@@ -102,7 +102,7 @@ pub fn read_midi_file(path: &str) -> Result<MIDIFile, &'static str> {
     for _i in 0..midi_file.track_num {
         let chunk_length = u32::from_be_bytes(data[offset+4..offset+8].try_into().expect("Invaild chunk!")) as usize;
 
-        if (&data[offset..]).starts_with(b"MTrk") {
+        if (data[offset..]).starts_with(b"MTrk") {
             midi_file.track.push(parse_mtrk(&data[offset+8..offset+8+chunk_length], chunk_length).expect("Read chunk failed."));
         }
         // Skip unknown chunks
@@ -119,18 +119,18 @@ mod tests {
 
     #[test]
     fn test_read_midi_head() {
-        let mf = read_midi_file("tests/tiny2.mid").expect("Read midi failed.");
+        let mf = read_midi_file("tests/tiny.mid").expect("Read midi failed.");
 
         assert!(mf.format == MIDIFormat::MultiTrack);
         println!("{:?}", mf.track_num);
         println!("{:?}", mf.division);
         for t in mf.track {
             for m in t.message {
-                if(m.status == EventStatus::NoteOn) {
+                if m.status == EventStatus::NoteOn {
                     println!("{:?}: {:?}", m.time, m.data);
                 }
-                if((m.status == EventStatus::Meta) ) {
-                    if(m.meta_type().unwrap() == MetaStatus::SetTempo) {
+                if m.status == EventStatus::Meta {
+                    if m.meta_type().unwrap() == MetaStatus::SetTempo {
                         println!("tempo {:?}", m.tempo_change().unwrap());
                     }
                 }
