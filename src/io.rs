@@ -4,8 +4,8 @@ use crate::message::{ EventStatus, MIDIMessage, MIDIFormat, MetaStatus};
 use crate::util:: read_variable_length;
 
 # [derive(Clone)]
-pub struct MIDIMessageIter<'a> {
-    data: &'a [u8],
+pub struct MIDIMessageIter {
+    data: Vec<u8>,
     bytes: usize,
 
     byte_offset: usize,
@@ -16,10 +16,10 @@ pub struct MIDIMessageIter<'a> {
     last_status_code: u8,
 }
 
-impl MIDIMessageIter<'_> {
+impl MIDIMessageIter {
     pub fn from_bytes(data: &[u8], bytes: usize) -> MIDIMessageIter {
         MIDIMessageIter {
-            data: data,
+            data: data.to_vec(),
             bytes: bytes,
 
             byte_offset: 0,
@@ -32,7 +32,7 @@ impl MIDIMessageIter<'_> {
     }
 }
 
-impl Iterator for MIDIMessageIter<'_> {
+impl Iterator for MIDIMessageIter {
     type Item = MIDIMessage;
 
     fn next(&mut self) -> Option<MIDIMessage> {
@@ -87,9 +87,9 @@ pub struct MIDITrackIter {
 }
 
 impl MIDITrackIter {
-    pub fn from_bytes(data: Vec<u8>, track_num: u16) -> MIDITrackIter {
+    pub fn from_bytes(data: &[u8], track_num: u16) -> MIDITrackIter {
         MIDITrackIter {
-            data: data,
+            data: data.to_vec(),
             byte_offset: 14,
             track_num: track_num,
             cur_track_idx: 0,
@@ -103,7 +103,7 @@ impl Iterator for MIDITrackIter {
     fn next(&mut self) -> Option<MIDIMessageIter> {
         if(self.cur_track_idx == self.track_num) { return None };
 
-        let chunk_length = u32::from_be_bytes(self.data[self.byte_offset+4..self.byte_offset+8].try_into().expect("Invaild chunk!")) as usize;
+        let mut chunk_length = u32::from_be_bytes(self.data[self.byte_offset+4..self.byte_offset+8].try_into().expect("Invaild chunk!")) as usize;
 
         // Skip unknown chunks
         while !(self.data[self.byte_offset..]).starts_with(b"MTrk") {
@@ -164,17 +164,10 @@ pub fn read_midi_file(path: &str) -> Result<MIDIFile, &'static str> {
 
     let mut offset: usize = 14;
 
-    for _i in 0..midi_file.track_num {
-        let chunk_length = u32::from_be_bytes(data[offset+4..offset+8].try_into().expect("Invaild chunk!")) as usize;
-
-        if (data[offset..]).starts_with(b"MTrk") {
-            let message_iter = MIDIMessageIter::from_bytes(&data[offset+8..offset+8+chunk_length], chunk_length);
-            midi_file.track.push(MIDITrack {
-                message: message_iter.into_iter().collect(),
-            });
-        }
-        // Skip unknown chunks
-        offset += 8 + chunk_length;
+    for t in MIDITrackIter::from_bytes(&data, midi_file.track_num) {
+        midi_file.track.push(MIDITrack {
+            message: t.into_iter().collect(),
+        });
     }
 
     Ok(midi_file)
