@@ -1,13 +1,13 @@
 mod io;
 mod message;
 mod util;
-mod formatter;
+mod sequence;
 
 use pyo3::prelude::*;
 pub use crate::io::{ MIDIFile, read_midi_file };
 pub use crate::message::{ EventStatus, MIDIMessage, MIDIFormat, MetaStatus };
 pub use crate::util::{ read_variable_length };
-pub use crate::formatter::*;
+pub use crate::sequence::*;
 
 /// Formats the sum of two numbers as string.
 #[pyfunction]
