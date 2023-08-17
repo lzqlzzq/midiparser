@@ -108,7 +108,7 @@ pub struct MIDIMessage {
     pub status: EventStatus,
     pub data: Vec<u8>,
 }
-// 32 + 8 + 64 + n * 8
+
 impl MIDIMessage {
     #[inline(always)]
     pub fn channel(&self) -> Option<u8> {
