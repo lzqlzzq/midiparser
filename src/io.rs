@@ -121,6 +121,32 @@ impl Iterator for MIDITrackIter {
     }
 }
 
+pub struct MIDIFileIter {
+    pub format: MIDIFormat,
+    pub track_num: u16,
+    pub division: u16,
+    pub track_iter: MIDITrackIter,
+}
+
+impl MIDIFileIter {
+    pub fn read_midi_file(path: &str) -> Result<Self, &'static str> {
+        let data = fs::read(path)
+            .expect(concat!("Can not read file ", stringify!(path)));
+
+        assert!(&data.starts_with(b"MThd"), "Invaild midi file. MThd expected.");
+
+        // Parse MThd Chunk
+        let (format, track_num, division) = MIDIFile::parse_mthd(&data[8..14]);
+
+        Ok(Self {
+            format: format,
+            track_num: track_num,
+            division: division,
+            track_iter: MIDITrackIter::from_bytes(&data, track_num),
+        })
+    }
+}
+
 #[derive(Clone)]
 pub struct MIDITrack {
     pub message: Vec<MIDIMessage>,
@@ -134,43 +160,38 @@ pub struct MIDIFile {
     pub track: Vec<MIDITrack>,
 }
 
-fn parse_mthd(data: &[u8]) -> (MIDIFormat, u16, u16) {
-
-    (match u16::from_be_bytes(data[0..2].try_into().expect("Error reading midi file.")) {
-            0 => MIDIFormat::SingleTrack,
-            1 => MIDIFormat::MultiTrack,
-            2 => MIDIFormat::MultiSong,
-            _ => panic!("Not a supported MIDI format."),
-        },
-        u16::from_be_bytes(data[2..4].try_into().expect("Error reading midi file.")),
-        u16::from_be_bytes(data[4..6].try_into().expect("Error reading midi file.")),
-    )
-}
-
-pub fn read_midi_file(path: &str) -> Result<MIDIFile, &'static str> {
-    let data = fs::read(path)
-        .expect(concat!("Can not read file ", stringify!(path)));
-
-    assert!(&data.starts_with(b"MThd"), "Invaild midi file. MThd expected.");
-
-    // Parse MThd Chunk
-    let (format, track_num, division) = parse_mthd(&data[8..14]);
-    let mut midi_file = MIDIFile {
-        format,
-        track_num,
-        division,
-        track: Vec::new(),
-    };
-
-    let mut offset: usize = 14;
-
-    for t in MIDITrackIter::from_bytes(&data, midi_file.track_num) {
-        midi_file.track.push(MIDITrack {
-            message: t.into_iter().collect(),
-        });
+impl MIDIFile {
+    pub fn parse_mthd(data: &[u8]) -> (MIDIFormat, u16, u16) {
+        (match u16::from_be_bytes(data[0..2].try_into().expect("Error reading midi file.")) {
+                0 => MIDIFormat::SingleTrack,
+                1 => MIDIFormat::MultiTrack,
+                2 => MIDIFormat::MultiSong,
+                _ => panic!("Not a supported MIDI format."),
+            },
+            u16::from_be_bytes(data[2..4].try_into().expect("Error reading midi file.")),
+            u16::from_be_bytes(data[4..6].try_into().expect("Error reading midi file.")),
+        )
     }
 
-    Ok(midi_file)
+    pub fn read_midi_file(path: &str) -> Result<Self, &'static str> {
+        let data = fs::read(path)
+            .expect(concat!("Can not read file ", stringify!(path)));
+
+        assert!(&data.starts_with(b"MThd"), "Invaild midi file. MThd expected.");
+
+        // Parse MThd Chunk
+        let (format, track_num, division) = Self::parse_mthd(&data[8..14]);
+
+        Ok(MIDIFile {
+            format,
+            track_num,
+            division,
+            track: MIDITrackIter::from_bytes(&data, track_num)
+                .map(|track| MIDITrack { message: track.into_iter().collect() })
+                .collect(),
+        })
+    }
+
 }
 
 
@@ -180,7 +201,7 @@ mod tests {
 
     #[test]
     fn test_read_midi_head() {
-        let mf = read_midi_file("tests/tiny.mid").expect("Read midi failed.");
+        let mf = MIDIFile::read_midi_file("tests/tiny.mid").expect("Read midi failed.");
 
         assert!(mf.format == MIDIFormat::MultiTrack);
         println!("{:?}", mf.track_num);

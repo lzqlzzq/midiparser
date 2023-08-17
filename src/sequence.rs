@@ -190,10 +190,10 @@ impl Sequence{
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::io::read_midi_file;
+
 	#[test]
 	fn test_midi2seq() {
-		let mf = read_midi_file("tests/tiny.mid").expect("Read midi failed.");
+		let mf = MIDIFile::read_midi_file("tests/tiny.mid").expect("Read midi failed.");
 		let seq = Sequence::from_midi(&mf);
 		println!("Time Signature: {:?}", seq.time_signatures);
 		println!("Key Signature: {:?}", seq.key_signatures);
