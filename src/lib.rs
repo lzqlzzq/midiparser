@@ -4,9 +4,9 @@ mod util;
 mod sequence;
 
 use pyo3::prelude::*;
-pub use crate::io::{ MIDIFile };
-pub use crate::message::{ EventStatus, MIDIMessage, MIDIFormat, MetaStatus };
-pub use crate::util::{ read_variable_length };
+pub use crate::io::{MIDIFile};
+pub use crate::message::{EventStatus, MIDIMessage, MIDIFormat, MetaStatus};
+pub use crate::util::{read_variable_length};
 pub use crate::sequence::*;
 
 /// Formats the sum of two numbers as string.

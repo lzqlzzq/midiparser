@@ -1,212 +1,167 @@
 use std::fs;
 use std::str;
-use crate::message::{ EventStatus, MIDIMessage, MIDIFormat, MetaStatus};
-use crate::util:: read_variable_length;
+use crate::message::{MIDIFormat, EventStatus, MIDIMessage, MetaStatus};
+use crate::util::read_variable_length;
 
-# [derive(Clone)]
-pub struct MIDIMessageIter {
+#[derive(Clone)]
+pub struct MIDIFile {
+    pub format: MIDIFormat,
+    pub division: u16,
+    pub tracks: Vec<MidiTrack>,
+}
+
+#[derive(Clone)]
+pub struct MidiTrack {
+    track_idx: u16,
     data: Vec<u8>,
-    bytes: usize,
+}
+
+pub struct MidiTrackIter<'a> {
+    data: &'a [u8],
 
     byte_offset: usize,
     tick_offset: u32,
 
-    last_status: EventStatus,
-    last_event_len: usize,
     last_status_code: u8,
+    last_event_len: usize,
 }
 
-impl MIDIMessageIter {
-    pub fn from_bytes(data: &[u8], bytes: usize) -> MIDIMessageIter {
-        MIDIMessageIter {
-            data: data.to_vec(),
-            bytes: bytes,
-
+impl MidiTrack {
+    pub fn iter(&self) -> MidiTrackIter {
+        MidiTrackIter {
+            data: &self.data,
             byte_offset: 0,
             tick_offset: 0,
-
-            last_status: EventStatus::Meta,
             last_event_len: 0,
             last_status_code: 0,
         }
     }
 }
 
-impl Iterator for MIDIMessageIter {
+impl MIDIFile {
+    pub fn from_file(path: &str) -> Result<MIDIFile, &'static str> {
+        let data = fs::read(path)
+            .expect(concat!("Can not read file ", stringify!(path)));
+        assert!(&data.starts_with(b"MThd"), "Invalid midi file. MThd expected.");
+        let (format, track_num, division) = Self::parse_mthd(&data[8..14]);
+        let mut midi = MIDIFile {
+            format,
+            division,
+            tracks: Vec::new(),
+        };
+        let mut byte_offset = 14;
+
+        for track_idx in 0..track_num {
+            let mut chunk_len = u32::from_be_bytes(
+                data[byte_offset + 4..byte_offset + 8]
+                    .try_into().expect("Invalid chunk!")
+            );
+            // Skip unknown chunks
+            while !data[byte_offset..].starts_with(b"MTrk") {
+                byte_offset += 8 + chunk_len as usize;
+                chunk_len = u32::from_be_bytes(
+                    data[byte_offset + 4..byte_offset + 8]
+                        .try_into().expect("Invalid chunk!")
+                )
+            }
+            let start = byte_offset + 8;
+            let end = start + chunk_len as usize;
+            byte_offset = end;
+            midi.tracks.push(MidiTrack {
+                track_idx,
+                data: data[start..end].to_vec(),
+            });
+        }
+        Ok(midi)
+    }
+
+    fn parse_mthd(data: &[u8]) -> (MIDIFormat, u16, u16) {
+        let to_u16 = |s: &[u8]|
+            u16::from_be_bytes(s.try_into().expect("Error reading midi file."));
+        let format = match to_u16(&data[0..2]) {
+            0 => MIDIFormat::SingleTrack,
+            1 => MIDIFormat::MultiTrack,
+            2 => MIDIFormat::MultiSong,
+            x => panic!("MIDI format {} is not supported.", x),
+        };
+        (format, to_u16(&data[2..4]), to_u16(&data[4..6]))
+    }
+}
+
+impl<'a> Iterator for MidiTrackIter<'a> {
     type Item = MIDIMessage;
 
-    fn next(&mut self) -> Option<MIDIMessage> {
-        if(self.byte_offset >= self.bytes) { return None };
-
-        let (bytes, value) = read_variable_length(&self.data[self.byte_offset..self.byte_offset+4].try_into().expect("Reading variable length error."));
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.byte_offset >= self.data.len() { return None; }
+        let (bytes, value) = read_variable_length(
+            &self.data[self.byte_offset..self.byte_offset + 4]
+                .try_into()
+                .expect("Reading variable length error.")
+        );
         self.byte_offset += bytes as usize;
         self.tick_offset += value as u32;
-        let this_status = &self.data[self.byte_offset];
 
-        let (event_status, message_data, length_to_offset) = match &this_status {
-            // Running status of MIDI Message has original length - 1.
-            0x00..=0x7F => {
-                let mut message = vec![self.last_status_code];
-                message.extend_from_slice(&self.data[self.byte_offset..self.byte_offset+self.last_event_len-1]);
-                (self.last_status, message, self.last_event_len - 1)
-            },
-            // Sysex message has variable length.
-            0xF0 => {
-                self.last_status_code = *this_status;
-                let status = EventStatus::from_status_code(&self.data[self.byte_offset]).0;
-                self.last_status = status;
-                for (idx, value) in self.data[self.byte_offset..].iter().enumerate() {
-                    if(*value == 0xF7 as u8) {
-                        self.last_event_len = idx;
-                        break;
+        let this_status: u8 = self.data[self.byte_offset];
+        let start = self.byte_offset;
+        let msg = match this_status {
+            // Just ignore and pass the SysEx Message
+            0xF0 | 0xF7 => {
+                let (bytes, mut event_len) = read_variable_length(
+                    match self.data.get(start + 1..start + 5) {
+                        Some(res) => res.try_into().unwrap(),
+                        None => &[0u8; 4]
                     }
-                }
-                (status, Vec::from(&self.data[self.byte_offset..self.byte_offset+self.last_event_len]), self.last_event_len)
-            } 
-            // MIDI Message has determinated length.
+                );
+                event_len += bytes as usize + 1;
+                self.byte_offset += event_len;
+                self.last_event_len = event_len;
+                self.last_status_code = this_status;
+                let end_byte = self.data[self.byte_offset - 1];
+                assert_eq!(end_byte, 0xf7_u8);
+                return self.next();
+            }
+            // Reuse last status code
+            0x00..=0x7F => {
+                assert_ne!(self.last_status_code, 0xFF, "Last status can't be meta");
+                self.byte_offset += self.last_event_len - 1;
+                MIDIMessage::new_event(
+                    self.tick_offset,
+                    self.last_status_code,
+                    &self.data[start..self.byte_offset],
+                )
+            }
+            // MIDI Messages has determinate length.
             0x80..=0xFE => {
-                self.last_status_code = *this_status;
-                let (status, event_len) = EventStatus::from_status_code(&self.data[self.byte_offset]);
-                (self.last_status, self.last_event_len) = (status, event_len as usize);
-                (status, Vec::from(&self.data[self.byte_offset..self.byte_offset+(event_len as usize)]), event_len as usize)
-            },
-            // Meta Message has variable length.
+                self.last_status_code = this_status;
+                let event_len = EventStatus::from_status_code(this_status).1 as usize;
+                self.byte_offset += event_len;
+                self.last_event_len = event_len;
+                MIDIMessage::new_event(
+                    self.tick_offset,
+                    this_status,
+                    &self.data[start + 1..self.byte_offset],
+                )
+            }
+            // Meta Messages has variable length.
             0xFF => {
-                let (meta_length_bytes, mut metalen) = read_variable_length(match self.data.get(self.byte_offset+2..self.byte_offset+6)
-                {
-                    Some(result) => result.try_into().unwrap(),
-                    None => &[0u8, 0u8, 0u8, 0u8],
-                });
-                metalen += (meta_length_bytes as usize) + 2;
-                (EventStatus::from_status_code(this_status).0, Vec::from(&self.data[self.byte_offset..self.byte_offset+metalen]), metalen)
-            },
+                let (bytes, mut meta_len) = read_variable_length(
+                    match self.data.get(start + 2..start + 6) {
+                        Some(res) => res.try_into().unwrap(),
+                        None => &[0u8; 4]
+                    }
+                );
+                meta_len += bytes as usize + 2;
+                self.byte_offset += meta_len;
+                MIDIMessage::new_meta(
+                    self.tick_offset,
+                    this_status,
+                    &self.data[start + 1..self.byte_offset],
+                )
+            }
         };
-
-        self.byte_offset += length_to_offset;
-
-        Some(MIDIMessage {
-            time: self.tick_offset,
-            status: event_status,
-            data: message_data,
-        })
+        Some(msg)
     }
 }
-
-pub struct MIDITrackIter {
-    data: Vec<u8>,
-    byte_offset: usize,
-    track_num: u16,
-    cur_track_idx: u16,
-}
-
-impl MIDITrackIter {
-    pub fn from_bytes(data: &[u8], track_num: u16) -> MIDITrackIter {
-        MIDITrackIter {
-            data: data.to_vec(),
-            byte_offset: 14,
-            track_num: track_num,
-            cur_track_idx: 0,
-        }
-    }
-}
-
-impl Iterator for MIDITrackIter {
-    type Item = MIDIMessageIter;
-
-    fn next(&mut self) -> Option<MIDIMessageIter> {
-        if(self.cur_track_idx == self.track_num) { return None };
-
-        let mut chunk_length = u32::from_be_bytes(self.data[self.byte_offset+4..self.byte_offset+8].try_into().expect("Invaild chunk!")) as usize;
-
-        // Skip unknown chunks
-        while !(self.data[self.byte_offset..]).starts_with(b"MTrk") {
-            self.byte_offset += 8 + chunk_length;
-            chunk_length = u32::from_be_bytes(self.data[self.byte_offset+4..self.byte_offset+8].try_into().expect("Invaild chunk!")) as usize;
-        }
-
-        let message_iter = MIDIMessageIter::from_bytes(&self.data[self.byte_offset+8..self.byte_offset+8+chunk_length], chunk_length);
-        
-        // Move track pointer and byte pointer.
-        self.cur_track_idx += 1;
-        self.byte_offset += 8 + chunk_length;
-
-        Some(message_iter)
-    }
-}
-
-pub struct MIDIFileIter {
-    pub format: MIDIFormat,
-    pub track_num: u16,
-    pub division: u16,
-    pub track_iter: MIDITrackIter,
-}
-
-impl MIDIFileIter {
-    pub fn read_midi_file(path: &str) -> Result<Self, &'static str> {
-        let data = fs::read(path)
-            .expect(concat!("Can not read file ", stringify!(path)));
-
-        assert!(&data.starts_with(b"MThd"), "Invaild midi file. MThd expected.");
-
-        // Parse MThd Chunk
-        let (format, track_num, division) = MIDIFile::parse_mthd(&data[8..14]);
-
-        Ok(Self {
-            format: format,
-            track_num: track_num,
-            division: division,
-            track_iter: MIDITrackIter::from_bytes(&data, track_num),
-        })
-    }
-}
-
-#[derive(Clone)]
-pub struct MIDITrack {
-    pub message: Vec<MIDIMessage>,
-}
-
-#[derive(Clone)]
-pub struct MIDIFile {
-    pub format: MIDIFormat,
-    pub track_num: u16,
-    pub division: u16,
-    pub track: Vec<MIDITrack>,
-}
-
-impl MIDIFile {
-    pub fn parse_mthd(data: &[u8]) -> (MIDIFormat, u16, u16) {
-        (match u16::from_be_bytes(data[0..2].try_into().expect("Error reading midi file.")) {
-                0 => MIDIFormat::SingleTrack,
-                1 => MIDIFormat::MultiTrack,
-                2 => MIDIFormat::MultiSong,
-                _ => panic!("Not a supported MIDI format."),
-            },
-            u16::from_be_bytes(data[2..4].try_into().expect("Error reading midi file.")),
-            u16::from_be_bytes(data[4..6].try_into().expect("Error reading midi file.")),
-        )
-    }
-
-    pub fn read_midi_file(path: &str) -> Result<Self, &'static str> {
-        let data = fs::read(path)
-            .expect(concat!("Can not read file ", stringify!(path)));
-
-        assert!(&data.starts_with(b"MThd"), "Invaild midi file. MThd expected.");
-
-        // Parse MThd Chunk
-        let (format, track_num, division) = Self::parse_mthd(&data[8..14]);
-
-        Ok(MIDIFile {
-            format,
-            track_num,
-            division,
-            track: MIDITrackIter::from_bytes(&data, track_num)
-                .map(|track| MIDITrack { message: track.into_iter().collect() })
-                .collect(),
-        })
-    }
-
-}
-
 
 #[cfg(test)]
 mod tests {
@@ -214,25 +169,23 @@ mod tests {
 
     #[test]
     fn test_read_midi_head() {
-        let mf = MIDIFile::read_midi_file("tests/tiny.mid").expect("Read midi failed.");
-
+        let mf = MIDIFile::from_file("tests/tiny.mid").expect("Read midi failed.");
         assert!(mf.format == MIDIFormat::MultiTrack);
-        println!("{:?}", mf.track_num);
+        println!("{:?}", mf.tracks.len());
         println!("{:?}", mf.division);
-        for t in mf.track {
-            for m in t.message {
-                if m.status == EventStatus::NoteOn {
-                    println!("{:?}: {:?}", m.time, m.data);
-                }
-                if m.status == EventStatus::Meta {
-                    if m.meta_type().unwrap() == MetaStatus::SetTempo {
-                        println!("tempo {:?}", m.tempo_change().unwrap());
+        for t in mf.tracks {
+            for m in t.iter() {
+                match m {
+                    MIDIMessage::Event(event) => {
+                        println!("{:?}: {:?}", event.time, event.data);
+                    }
+                    MIDIMessage::Meta(meta) => {
+                        if meta.status == MetaStatus::SetTempo {
+                            println!("tempo {:?}", meta.tempo().unwrap());
+                        }
                     }
                 }
             }
         }
-        // assert!(mf.track_num == 18);
-        // assert!(mf.tick_per_quarter == 960);
     }
 }
-
