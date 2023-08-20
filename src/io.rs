@@ -104,7 +104,7 @@ impl<'a> Iterator for MidiTrackIter<'a> {
         let this_status: u8 = self.data[self.byte_offset];
         let start = self.byte_offset;
         let msg = match this_status {
-            // MIDI Messages and SysEx Messages has determinate length.
+            // Just ignore and pass the SysEx Message
             0xF0 | 0xF7 => {
                 let (bytes, mut event_len) = read_variable_length(
                     match self.data.get(start + 1..start + 5) {
@@ -120,6 +120,7 @@ impl<'a> Iterator for MidiTrackIter<'a> {
                 assert_eq!(end_byte, 0xf7_u8);
                 return self.next();
             }
+            // Reuse last status code
             0x00..=0x7F => {
                 assert_ne!(self.last_status_code, 0xFF, "Last status can't be meta");
                 self.byte_offset += self.last_event_len - 1;
@@ -127,8 +128,9 @@ impl<'a> Iterator for MidiTrackIter<'a> {
                     self.tick_offset,
                     self.last_status_code,
                     &self.data[start..self.byte_offset],
-                ) // data 部分统一不包含 status code，在 new 函数中统一拼接
+                )
             }
+            // MIDI Messages has determinate length.
             0x80..=0xFE => {
                 self.last_status_code = this_status;
                 let event_len = EventStatus::from_status_code(this_status).1 as usize;
