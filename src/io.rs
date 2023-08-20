@@ -44,20 +44,33 @@ impl Iterator for MIDIMessageIter {
         let this_status = &self.data[self.byte_offset];
 
         let (event_status, message_data, length_to_offset) = match &this_status {
-            // Running status of MIDI Messages has original length - 1.
+            // Running status of MIDI Message has original length - 1.
             0x00..=0x7F => {
                 let mut message = vec![self.last_status_code];
                 message.extend_from_slice(&self.data[self.byte_offset..self.byte_offset+self.last_event_len-1]);
                 (self.last_status, message, self.last_event_len - 1)
             },
-            // MIDI Messages and SysEx Messages has determinated length.
+            // Sysex message has variable length.
+            0xF0 => {
+                self.last_status_code = *this_status;
+                let status = EventStatus::from_status_code(&self.data[self.byte_offset]).0;
+                self.last_status = status;
+                for (idx, value) in self.data[self.byte_offset..].iter().enumerate() {
+                    if(*value == 0xF7 as u8) {
+                        self.last_event_len = idx;
+                        break;
+                    }
+                }
+                (status, Vec::from(&self.data[self.byte_offset..self.byte_offset+self.last_event_len]), self.last_event_len)
+            } 
+            // MIDI Message has determinated length.
             0x80..=0xFE => {
                 self.last_status_code = *this_status;
                 let (status, event_len) = EventStatus::from_status_code(&self.data[self.byte_offset]);
                 (self.last_status, self.last_event_len) = (status, event_len as usize);
                 (status, Vec::from(&self.data[self.byte_offset..self.byte_offset+(event_len as usize)]), event_len as usize)
             },
-            // Meta Messages has variable length.
+            // Meta Message has variable length.
             0xFF => {
                 let (meta_length_bytes, mut metalen) = read_variable_length(match self.data.get(self.byte_offset+2..self.byte_offset+6)
                 {
