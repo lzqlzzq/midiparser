@@ -220,50 +220,14 @@ impl Meta {
     }
 
     #[inline(always)]
-    pub fn key_signature(&self) -> Option<&'static str> {
-        match self.status {
-            MetaStatus::KeySignature => Some(
-                if self.data[4] == 0 {
-                    match self.data[3] as i8 {
-                        -7i8 => "bC",
-                        -6i8 => "bG",
-                        -5i8 => "bD",
-                        -4i8 => "bA",
-                        -3i8 => "bE",
-                        -2i8 => "bB",
-                        -1i8 => "F",
-                        0i8 => "C",
-                        1i8 => "G",
-                        2i8 => "D",
-                        3i8 => "A",
-                        4i8 => "E",
-                        5i8 => "B",
-                        6i8 => "#F",
-                        7i8 => "#C",
-                        _ => panic!("Not a valid key signature."),
-                    }
-                } else {
-                    match self.data[3] as i8 {
-                        -7i8 => "bc",
-                        -6i8 => "bg",
-                        -5i8 => "bd",
-                        -4i8 => "ba",
-                        -3i8 => "be",
-                        -2i8 => "bb",
-                        -1i8 => "f",
-                        0i8 => "c",
-                        1i8 => "g",
-                        2i8 => "d",
-                        3i8 => "a",
-                        4i8 => "e",
-                        5i8 => "b",
-                        6i8 => "#f",
-                        7i8 => "#c",
-                        _ => panic!("Not a valid key signature."),
-                    }
-                }),
-            _ => None,
-        }
+    pub fn key_signature(&self) -> Option<(bool, i8)> {
+        // bC bG bD bA bE bB F C G D A E B #F #C
+        // bc bg bd ba be bb f c g d a e b #f #c
+        if let MetaStatus::KeySignature = self.status {
+            let key = self.data[3] as i8;
+            assert!(key >= -7 && key <= 7, "KeySignature: {} is invalid", key);
+            Some((self.data[4] == 0, key as i8))
+        } else { None }
     }
     #[inline(always)]
     pub fn time_signature(&self) -> Option<(u8, u8, u8, u8)> {

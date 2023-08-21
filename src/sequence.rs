@@ -1,58 +1,111 @@
 use std::collections::HashMap;
+use std::fmt::Debug;
+use pyo3::exceptions::{PyIOError};
+use pyo3::prelude::*;
 use crate::io::MIDIFile;
 use crate::message::{MIDIMessage, MetaStatus, EventStatus};
 use crate::util::tempo2qpm;
+use serde::{Serialize, Deserialize};
+use serde_yaml;
 
 const DEFAULT_QPM: f32 = 120.0;
 const DEFAULT_TEMPO: u32 = 500000;
 
-#[derive(Clone, Debug)]
+#[pyclass]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Sequence {
+    #[pyo3(get, set)]
     pub tracks: Vec<Track>,
+    #[pyo3(get, set)]
     pub time_signatures: Vec<TimeSignature>,
+    #[pyo3(get, set)]
     pub key_signatures: Vec<KeySignature>,
+    #[pyo3(get, set)]
     pub qpm: Vec<Tempo>,
 }
-
-#[derive(Clone, Debug, Default)]
+#[pyclass]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Track {
+    #[pyo3(get, set)]
     pub name: String,
+    #[pyo3(get, set)]
     pub program: u8,
+    #[pyo3(get, set)]
     pub is_drum: bool,
+    #[pyo3(get, set)]
     pub notes: Vec<Note>,
+    #[pyo3(get, set)]
+    pub controls: HashMap<u8, Vec<ControlChange>>,
+}
+#[pyclass]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct TrackTrans {
+    #[pyo3(get, set)]
+    pub name: String,
+    #[pyo3(get, set)]
+    pub program: u8,
+    #[pyo3(get, set)]
+    pub is_drum: bool,
+    #[pyo3(get, set)]
+    pub pitch: Vec<u8>,
+    #[pyo3(get, set)]
+    pub start: Vec<f32>,
+    #[pyo3(get, set)]
+    pub duration: Vec<f32>,
+    #[pyo3(get, set)]
+    pub velocity: Vec<u8>,
+    #[pyo3(get, set)]
     pub controls: HashMap<u8, Vec<ControlChange>>,
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
+#[pyclass]
 pub struct Note {
+    #[pyo3(get, set)]
     pub pitch: u8,
+    #[pyo3(get, set)]
     pub start: f32,
+    #[pyo3(get, set)]
     pub duration: f32,
+    #[pyo3(get, set)]
     pub velocity: u8,
 }
 
-#[derive(Copy, Clone, Debug)]
+#[pyclass]
+#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
 pub struct ControlChange {
+    #[pyo3(get, set)]
     pub time: f32,
+    #[pyo3(get, set)]
     pub value: u8,
 }
 
-#[derive(Copy, Clone, Debug)]
+#[pyclass]
+#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
 pub struct TimeSignature {
+    #[pyo3(get, set)]
     pub time: f32,
+    #[pyo3(get, set)]
     pub numerator: u8,
+    #[pyo3(get, set)]
     pub denominator: u8,
 }
 
-#[derive(Copy, Clone, Debug)]
+#[pyclass]
+#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
 pub struct KeySignature {
+    #[pyo3(get, set)]
     pub time: f32,
-    pub key: &'static str,
+    #[pyo3(get, set)]
+    pub key: (bool, i8), // bool true 代表大调，false代表小调
 }
 
-#[derive(Copy, Clone, Debug)]
+#[pyclass]
+#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
 pub struct Tempo {
+    #[pyo3(get, set)]
     pub time: f32,
+    #[pyo3(get, set)]
     pub qpm: f32,
 }
 
@@ -173,7 +226,6 @@ impl Sequence {
         if qpm.is_empty() || qpm[0].time > 0.0 {
             qpm.insert(0, Tempo { time: 0.0, qpm: DEFAULT_QPM });
         }
-        println!("Track Num: {}", tracks.len());
         Ok(Sequence {
             tracks: tracks
                 .into_iter()
@@ -189,20 +241,90 @@ impl Sequence {
     }
 }
 
+#[pymethods]
+impl Sequence {
+    #[new]
+    pub fn py_new(path: &str) -> PyResult<Self> {
+        let seq = Self::from_file(path);
+        match seq {
+            Err(info) => Err(PyIOError::new_err(info)),
+            Ok(seq) => Ok(seq)
+        }
+    }
+    pub fn __repr__(&self) -> String {
+        serde_yaml::to_string(&self).unwrap()
+    }
+}
+
+impl Track {
+    pub fn transpose(&self) -> TrackTrans {
+        let mut pitch = Vec::with_capacity(self.notes.len());
+        let mut start = Vec::with_capacity(self.notes.len());
+        let mut duration = Vec::with_capacity(self.notes.len());
+        let mut velocity = Vec::with_capacity(self.notes.len());
+        for note in &self.notes {
+            pitch.push(note.pitch);
+            start.push(note.start);
+            duration.push(note.duration);
+            velocity.push(note.velocity);
+        } TrackTrans{
+            pitch, start, duration, velocity,
+            program: self.program,
+            is_drum: self.is_drum,
+            name: self.name.clone(),
+            controls: self.controls.clone()
+        }
+    }
+}
+
+#[pymethods]
+impl Track {
+    pub fn __repr__(&self) -> String {
+        serde_yaml::to_string(&self).unwrap()
+    }
+
+    #[pyo3(name="transpose")]
+    pub fn py_transpose(&self) -> TrackTrans {self.transpose()}
+}
+
+#[pymethods]
+impl TrackTrans {
+    fn __repr__(&self) -> String { return format!("{:?}", self) }
+}
+#[pymethods]
+impl Note {
+    fn __repr__(&self) -> String { return format!("{:?}", self) }
+}
+
+#[pymethods]
+impl TimeSignature {
+    fn __repr__(&self) -> String { return format!("{:?}", self) }
+}
+
+#[pymethods]
+impl KeySignature {
+    fn __repr__(&self) -> String { return format!("{:?}", self) }
+}
+
+#[pymethods]
+impl ControlChange {
+    fn __repr__(&self) -> String { return format!("{:?}", self) }
+}
+
+#[pymethods]
+impl Tempo {
+    fn __repr__(&self) -> String { return format!("{:?}", self) }
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
+    use serde_json;
+    use serde_yaml;
     #[test]
     fn test_midi2seq() {
         let seq = Sequence::from_file("tests/tiny.mid").unwrap();
-        println!("Time Signature: {:?}", seq.time_signatures);
-        println!("Key Signature: {:?}", seq.key_signatures);
-        println!("QPM {:?}", seq.qpm);
-        for track in seq.tracks {
-            println!("Track: {}", track.name);
-            println!("{:?}", track);
-        }
+        let t= serde_yaml::to_string(&seq).unwrap();
+        println!("{t}");
     }
 }
