@@ -10,7 +10,7 @@ pub use crate::util::{read_variable_length};
 pub use crate::sequence::*;
 
 #[pymodule]
-fn midifile(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
+fn midiparse_core(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
     m.add_class::<Sequence>()?;
     Ok(())
 }
