@@ -285,6 +285,15 @@ impl Track {
 
     #[pyo3(name="transpose")]
     pub fn py_transpose(&self) -> TrackTrans {self.transpose()}
+
+    #[new]
+    pub fn py_new(
+        name: String, program: u8,
+        is_drum: bool, notes: Vec<Note>,
+        controls: HashMap<u8, Vec<ControlChange>>
+    ) -> Self {
+        Self{name, program, is_drum, notes, controls}
+    }
 }
 
 #[pymethods]
@@ -293,26 +302,50 @@ impl TrackTrans {
 }
 #[pymethods]
 impl Note {
+    #[new]
+    fn py_new(pitch: u8, start: f32, duration: f32, velocity: u8) -> Self{
+        Self{pitch, start, duration, velocity}
+    }
     fn __repr__(&self) -> String { return format!("{:?}", self) }
+
+    fn end(&self) -> f32 { self.start + self.duration }
 }
 
 #[pymethods]
 impl TimeSignature {
+    #[new]
+    fn py_new(time: f32, numerator: u8, denominator: u8) -> Self {
+        Self{time, numerator, denominator}
+    }
     fn __repr__(&self) -> String { return format!("{:?}", self) }
 }
 
 #[pymethods]
 impl KeySignature {
+    #[new]
+    fn py_new(time: f32, key: (bool, i8)) -> Self {
+        // bool true代表大调，false 小调
+        assert!(key.1 >= -7 && key.1 <= 7, "Key: {:?} is invalid", key);
+        Self{time, key}
+    }
     fn __repr__(&self) -> String { return format!("{:?}", self) }
 }
 
 #[pymethods]
 impl ControlChange {
+    #[new]
+    fn py_new(time: f32, value: u8) -> Self{
+       Self{time, value}
+    }
     fn __repr__(&self) -> String { return format!("{:?}", self) }
 }
 
 #[pymethods]
 impl Tempo {
+    #[new]
+    fn py_new(time: f32, qpm: f32) -> Self{
+        Self{time, qpm}
+    }
     fn __repr__(&self) -> String { return format!("{:?}", self) }
 }
 

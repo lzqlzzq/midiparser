@@ -12,5 +12,11 @@ pub use crate::sequence::*;
 #[pymodule]
 fn midiparse_core(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
     m.add_class::<Sequence>()?;
+    m.add_class::<Track>()?;
+    m.add_class::<TrackTrans>()?;
+    m.add_class::<Note>()?;
+    m.add_class::<TimeSignature>()?;
+    m.add_class::<KeySignature>()?;
+    m.add_class::<Tempo>()?;
     Ok(())
 }
