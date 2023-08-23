@@ -23,6 +23,7 @@ pub struct Sequence {
     #[pyo3(get, set)]
     pub qpm: Vec<Tempo>,
 }
+
 #[pyclass]
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Track {
@@ -37,6 +38,7 @@ pub struct Track {
     #[pyo3(get, set)]
     pub controls: HashMap<u8, Vec<ControlChange>>,
 }
+
 #[pyclass]
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct TrackTrans {
@@ -251,8 +253,41 @@ impl Sequence {
             Ok(seq) => Ok(seq)
         }
     }
+
     pub fn __repr__(&self) -> String {
         serde_yaml::to_string(&self).unwrap()
+    }
+
+    pub fn sort(&mut self) {
+        self.time_signatures.sort_by(|a, b| a.time.partial_cmp(&b.time).unwrap());
+        self.qpm.sort_by(|a, b| a.time.partial_cmp(&b.time).unwrap());
+        self.key_signatures.sort_by(|a, b| a.time.partial_cmp(&b.time).unwrap());
+        for mut track in self.tracks.iter_mut() {
+            track.sort();
+        }
+    }
+
+    pub fn start_in_measure(&self) -> Vec<Vec<f32>> {
+        let mut time_in_measure = Vec::<Vec<f32>>::with_capacity(self.tracks.len());
+
+        for track in &self.tracks {
+            let mut starts = Vec::<f32>::with_capacity(track.notes.len());
+
+            let mut next_timesig_time = if(self.time_signatures.len() > 1) {self.time_signatures[1].time} else {f32::MAX};
+            let mut this_timesig = self.time_signatures[0];
+            let mut this_timesig_idx = 0;
+            for note in &track.notes {
+                if(note.start >= next_timesig_time) {
+                    this_timesig_idx += 1;
+                    this_timesig = self.time_signatures[this_timesig_idx];
+                    next_timesig_time = if(this_timesig_idx < self.time_signatures.len() - 1) {self.time_signatures[1].time} else {f32::MAX};
+                }
+                starts.push((note.start - this_timesig.time) % (this_timesig.numerator as f32));
+            }
+            time_in_measure.push(starts);
+        }
+
+        time_in_measure
     }
 }
 
@@ -273,6 +308,14 @@ impl Track {
             is_drum: self.is_drum,
             name: self.name.clone(),
             controls: self.controls.clone()
+        }
+    }
+
+    pub fn sort(&mut self) {
+        self.notes.sort_by(|a, b| a.start.partial_cmp(&b.start).unwrap());
+
+        for (control_number, control_change) in self.controls.iter_mut() {
+            control_change.sort_by(|a, b| a.time.partial_cmp(&b.time).unwrap());
         }
     }
 }
@@ -359,5 +402,6 @@ mod tests {
         let seq = Sequence::from_file("tests/tiny.mid").unwrap();
         let t= serde_yaml::to_string(&seq).unwrap();
         println!("{t}");
+        println!("{:?}", seq.start_in_measure());
     }
 }
